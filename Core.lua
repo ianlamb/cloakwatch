@@ -315,7 +315,7 @@ end)
 -- SLASH COMMANDS
 -- ============================================================
 SLASH_CLOAKWATCH1 = "/cloakwatch"
-SLASH_CLOAKWATCH2 = "/cw"
+SLASH_CLOAKWATCH2 = "/cwatch"   -- "/cw" is a built-in client command, don't shadow it
 SlashCmdList["CLOAKWATCH"] = function(msg)
     msg = (msg or ""):lower()
     msg = msg:match("^%s*(.-)%s*$") -- trim
@@ -330,6 +330,6 @@ SlashCmdList["CLOAKWATCH"] = function(msg)
     elseif msg == "toggle" or msg == "" then
         if CW.ToggleUI then CW.ToggleUI() end
     else
-        print("|cff33ff99CloakWatch|r: /cw to toggle the window, /cw rescan to requeue everyone.")
+        print("|cff33ff99CloakWatch|r: /cloakwatch to toggle the window, /cloakwatch rescan to requeue everyone.")
     end
 end
