@@ -1,0 +1,8 @@
+## Interface: 11508
+## Title: CloakWatch
+## Notes: Tracks which raid members have the Onyxia Scale Cloak equipped while in Blackwing Lair.
+## Author: Ian
+## Version: 1.0.0
+
+Core.lua
+UI.lua
