@@ -315,7 +315,7 @@ end)
 -- SLASH COMMANDS
 -- ============================================================
 SLASH_CLOAKWATCH1 = "/cloakwatch"
-SLASH_CLOAKWATCH2 = "/cwatch"   -- "/cw" is a built-in client command, don't shadow it
+SLASH_CLOAKWATCH2 = "/cloak"   -- "/cw" is a built-in client command, don't shadow it
 SlashCmdList["CLOAKWATCH"] = function(msg)
     msg = (msg or ""):lower()
     msg = msg:match("^%s*(.-)%s*$") -- trim
