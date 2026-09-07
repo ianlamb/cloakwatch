@@ -10,11 +10,13 @@ local CLOAK_SLOT       = 15                    -- back slot
 local CLOAK_ITEM_NAME  = "Onyxia Scale Cloak"
 local OUTDATED_AFTER   = 300                    -- seconds before a scan is considered stale
 local SCAN_INTERVAL    = 1.0                    -- seconds between inspect attempts
-local INSPECT_TIMEOUT  = 2.0                    -- give up on a stuck inspect after this long
+local INSPECT_TIMEOUT  = 3.0                    -- give up on a stuck inspect after this long
+local RETRY_COOLDOWN   = 10                     -- don't re-attempt the same player for this long after any attempt
 local AGE_CHECK_PERIOD = 15                     -- how often we re-check for outdated entries
 
--- Lower number = scanned sooner. Matches the priority you asked for:
--- unscanned > outdated > cloak off > cloak on
+-- Lower number = scanned sooner: unscanned > outdated > cloak off > cloak on.
+-- Ties within a tier are broken by oldest attempt first (see NextScanTarget),
+-- so the scan rotates through everyone instead of fixating on one player.
 local STATE_PRIORITY = {
     unscanned = 1,
     outdated  = 2,
@@ -115,10 +117,11 @@ local function RefreshRoster()
                     seen[name] = true
                     if not CW.players[name] then
                         CW.players[name] = {
-                            status   = "unscanned",
-                            lastScan = 0,
-                            guid     = UnitGUID(unit),
-                            class    = select(2, UnitClass(unit)),
+                            status      = "unscanned",
+                            lastScan    = 0,   -- time of last completed inspect (result)
+                            lastAttempt = 0,   -- time we last tried, success or not (drives rotation)
+                            guid        = UnitGUID(unit),
+                            class       = select(2, UnitClass(unit)),
                         }
                     else
                         CW.players[name].guid = UnitGUID(unit)
@@ -167,17 +170,23 @@ local function UnitTokenForName(name)
     return nil
 end
 
--- Picks the highest-priority name to scan next. Skips ourselves - our own
--- cloak status is read directly via UpdateOwnCloak(), not inspected.
+-- Picks who to inspect next. Skips ourselves (own cloak is read directly via
+-- UpdateOwnCloak(), not inspected) and anyone attempted within RETRY_COOLDOWN,
+-- so a player we currently can't reach doesn't wedge the queue. Within a
+-- priority tier the least-recently-attempted player wins, so the scan keeps
+-- rotating through the whole roster. Returns nil when everyone is cooling down.
 local function NextScanTarget()
     local myName = UnitName("player")
-    local bestName, bestPriority
+    local now = GetTime()
+    local bestName, bestPriority, bestAttempt
     for name, data in pairs(CW.players) do
-        if name ~= myName then
+        if name ~= myName and now - (data.lastAttempt or 0) >= RETRY_COOLDOWN then
             local prio = STATE_PRIORITY[data.status] or 99
-            if not bestPriority or prio < bestPriority then
-                bestPriority = prio
-                bestName = name
+            local attempt = data.lastAttempt or 0
+            if not bestName
+               or prio < bestPriority
+               or (prio == bestPriority and attempt < bestAttempt) then
+                bestName, bestPriority, bestAttempt = name, prio, attempt
             end
         end
     end
@@ -210,11 +219,17 @@ local function TryScanNext()
     local name = NextScanTarget()
     if not name then return end
 
+    -- Stamp the attempt up front, before any bailout below. An unreachable
+    -- player then goes on RETRY_COOLDOWN just like an inspected one, so the
+    -- queue rotates past them instead of picking them again every tick.
+    local data = CW.players[name]
+    if data then data.lastAttempt = GetTime() end
+
     local unit = UnitTokenForName(name)
     if not unit then return end
 
     -- Requires: present/rendered, inspectable, and within inspect range - missing
-    -- any of these just retries next tick rather than throwing a client error.
+    -- any of these just retries after the cooldown rather than throwing a client error.
     if not (IsUnitPresent(unit) and CanInspect(unit) and IsInInspectRange(unit)) then return end
 
     CW.pendingUnit  = unit
@@ -322,8 +337,9 @@ SlashCmdList["CLOAKWATCH"] = function(msg)
 
     if msg == "rescan" then
         for _, data in pairs(CW.players) do
-            data.status   = "unscanned"
-            data.lastScan = 0
+            data.status      = "unscanned"
+            data.lastScan    = 0
+            data.lastAttempt = 0
         end
         if CW.RefreshUI then CW.RefreshUI() end
         print("|cff33ff99CloakWatch|r: requeued all raid members for scanning.")
