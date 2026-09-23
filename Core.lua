@@ -70,8 +70,9 @@ end
 -- ============================================================
 -- HELPERS
 -- ============================================================
+-- CW.debug (toggled via /cloak debug, not saved across sessions) lifts the zone restriction for testing.
 local function InZone()
-    return GetRealZoneText() == ZONE_NAME
+    return CW.debug or GetRealZoneText() == ZONE_NAME
 end
 
 local function InRelevantGroup()
@@ -365,11 +366,15 @@ SlashCmdList["CLOAKWATCH"] = function(msg)
         end
         if CW.RefreshUI then CW.RefreshUI() end
         print("|cff33ff99CloakWatch|r: requeued all raid members for scanning.")
+    elseif msg == "debug" then
+        CW.debug = not CW.debug
+        EvaluateActive()
+        print("|cff33ff99CloakWatch|r: debug mode " .. (CW.debug and "ON - tracking in any zone (still requires a raid group)." or "OFF - Blackwing Lair only."))
     elseif msg == "peers" then
         print("|cff33ff99CloakWatch|r: heard from " .. (CW.PeerCount and CW.PeerCount() or 0) .. " other CloakWatch user(s) in the last 10 minutes.")
     elseif msg == "toggle" or msg == "" then
         if CW.ToggleUI then CW.ToggleUI() end
     else
-        print("|cff33ff99CloakWatch|r: /cloakwatch to toggle the window, /cloakwatch rescan to requeue everyone.")
+        print("|cff33ff99CloakWatch|r: /cloakwatch to toggle the window, rescan to requeue everyone, peers to list other users, debug to track outside Blackwing Lair.")
     end
 end
