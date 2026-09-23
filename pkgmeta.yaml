@@ -1,0 +1,12 @@
+package-as: CloakWatch
+
+ignore:
+  - .git
+  - .gitignore
+  - .gitattributes
+  - .github
+  - .claude
+  - .vscode
+  - .idea
+  - pkgmeta.yaml
+  - README.md
