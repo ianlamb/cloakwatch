@@ -12,6 +12,8 @@ local OUTDATED_AFTER   = 300                    -- seconds before a scan is cons
 local SCAN_INTERVAL    = 1.0                    -- seconds between inspect attempts
 local INSPECT_TIMEOUT  = 3.0                    -- give up on a stuck inspect after this long
 local RETRY_COOLDOWN   = 10                     -- don't re-attempt the same player for this long after any attempt
+local RESCAN_AFTER     = 30                     -- a fresh on/off result (ours or a peer's) isn't re-inspected for this long
+local OWN_REBROADCAST  = 60                     -- re-share our own cloak status this often so peers don't age it out
 local AGE_CHECK_PERIOD = 15                     -- how often we re-check for outdated entries
 
 -- Lower number = scanned sooner: unscanned > outdated > cloak off > cloak on.
@@ -27,7 +29,9 @@ local STATE_PRIORITY = {
 -- ============================================================
 -- STATE
 -- ============================================================
+CW.OUTDATED_AFTER = OUTDATED_AFTER
 CW.players = {}   -- [name] = { status, lastScan, guid, class }
+CW.shared  = {}   -- [name] = { status, lastScan } reported by peers, incl. players we can't see yet
 CW.active  = false
 CW.pendingUnit  = nil
 CW.pendingGUID  = nil
@@ -93,8 +97,16 @@ local function UpdateOwnCloak()
     if not name or not CW.players[name] then return end
     local link = GetInventoryItemLink("player", CLOAK_SLOT)
     local hasCloak = link ~= nil and link:find(CLOAK_ITEM_NAME, 1, true) ~= nil
-    CW.players[name].status   = hasCloak and "on" or "off"
-    CW.players[name].lastScan = GetTime()
+    local data     = CW.players[name]
+    local newStatus = hasCloak and "on" or "off"
+    local now      = GetTime()
+    local changed  = data.status ~= newStatus
+    data.status   = newStatus
+    data.lastScan = now
+    if (changed or now - (data.lastBroadcast or 0) >= OWN_REBROADCAST) and CW.BroadcastStatus then
+        data.lastBroadcast = now
+        CW.BroadcastStatus(name)
+    end
     if CW.RefreshUI then CW.RefreshUI() end
 end
 
@@ -123,6 +135,12 @@ local function RefreshRoster()
                             guid        = UnitGUID(unit),
                             class       = select(2, UnitClass(unit)),
                         }
+                        -- A peer may already have scanned them while they were out of our view.
+                        local shared = CW.shared[name]
+                        if shared and GetTime() - shared.lastScan < OUTDATED_AFTER then
+                            CW.players[name].status   = shared.status
+                            CW.players[name].lastScan = shared.lastScan
+                        end
                     else
                         CW.players[name].guid = UnitGUID(unit)
                     end
@@ -180,7 +198,8 @@ local function NextScanTarget()
     local now = GetTime()
     local bestName, bestPriority, bestAttempt
     for name, data in pairs(CW.players) do
-        if name ~= myName and now - (data.lastAttempt or 0) >= RETRY_COOLDOWN then
+        local fresh = (data.status == "on" or data.status == "off") and now - data.lastScan < RESCAN_AFTER
+        if name ~= myName and not fresh and now - (data.lastAttempt or 0) >= RETRY_COOLDOWN then
             local prio = STATE_PRIORITY[data.status] or 99
             local attempt = data.lastAttempt or 0
             if not bestName
@@ -248,6 +267,7 @@ local function OnInspectReady(guid)
         local hasCloak = link ~= nil and link:find(CLOAK_ITEM_NAME, 1, true) ~= nil
         CW.players[name].status   = hasCloak and "on" or "off"
         CW.players[name].lastScan = GetTime()
+        if CW.BroadcastStatus then CW.BroadcastStatus(name) end
     end
 
     ClearPending()
@@ -275,11 +295,13 @@ local function StartScanning()
         SetCVar("Sound_EnableErrorSpeech", "0")
     end
     if CW.ShowUI then CW.ShowUI() end
+    if CW.SendHello then CW.SendHello() end
 end
 
 local function StopScanning()
     if not CW.active then return end
     CW.active = false
+    CW.shared = {}
     ClearPending()
     if scanTicker then scanTicker:Cancel(); scanTicker = nil end
     if ageTicker then ageTicker:Cancel(); ageTicker = nil end
@@ -343,6 +365,8 @@ SlashCmdList["CLOAKWATCH"] = function(msg)
         end
         if CW.RefreshUI then CW.RefreshUI() end
         print("|cff33ff99CloakWatch|r: requeued all raid members for scanning.")
+    elseif msg == "peers" then
+        print("|cff33ff99CloakWatch|r: heard from " .. (CW.PeerCount and CW.PeerCount() or 0) .. " other CloakWatch user(s) in the last 10 minutes.")
     elseif msg == "toggle" or msg == "" then
         if CW.ToggleUI then CW.ToggleUI() end
     else
