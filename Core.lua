@@ -11,7 +11,7 @@ local CLOAK_ITEM_NAME  = "Onyxia Scale Cloak"
 local OUTDATED_AFTER   = 300                    -- seconds before a scan is considered stale
 local SCAN_INTERVAL    = 1.0                    -- seconds between inspect attempts
 local INSPECT_TIMEOUT  = 3.0                    -- give up on a stuck inspect after this long
-local RETRY_COOLDOWN   = 10                     -- don't re-attempt the same player for this long after any attempt
+local RETRY_COOLDOWN   = 5                      -- don't re-attempt the same player for this long after any attempt
 local RESCAN_AFTER     = 30                     -- a fresh on/off result (ours or a peer's) isn't re-inspected for this long
 local OWN_REBROADCAST  = 60                     -- re-share our own cloak status this often so peers don't age it out
 local AGE_CHECK_PERIOD = 15                     -- how often we re-check for outdated entries
@@ -189,12 +189,33 @@ local function UnitTokenForName(name)
     return nil
 end
 
--- Picks who to inspect next. Skips ourselves (own cloak is read directly via
--- UpdateOwnCloak(), not inspected) and anyone attempted within RETRY_COOLDOWN,
--- so a player we currently can't reach doesn't wedge the queue. Within a
--- priority tier the least-recently-attempted player wins, so the scan keeps
--- rotating through the whole roster. Returns nil when everyone is cooling down.
+-- Lets your current WoW target jump the queue for a spot check: if you've
+-- targeted a tracked player who isn't confirmed "on" and isn't on cooldown,
+-- scan them next instead of waiting for their normal turn. Still subject to
+-- RETRY_COOLDOWN like everyone else, so this can't be used to spam one player.
+local function TargetOverride()
+    if not UnitExists("target") or not UnitIsPlayer("target") then return nil end
+    local name = UnitName("target")
+    if not name or name == UnitName("player") then return nil end
+
+    local data = CW.players[name]
+    if not data or data.status == "on" then return nil end
+    if GetTime() - (data.lastAttempt or 0) < RETRY_COOLDOWN then return nil end
+
+    return name
+end
+
+-- Picks who to inspect next. Your current target gets first refusal (see
+-- TargetOverride above); otherwise skips ourselves (own cloak is read
+-- directly via UpdateOwnCloak(), not inspected) and anyone attempted within
+-- RETRY_COOLDOWN, so a player we currently can't reach doesn't wedge the
+-- queue. Within a priority tier the least-recently-attempted player wins, so
+-- the scan keeps rotating through the whole roster. Returns nil when
+-- everyone is cooling down.
 local function NextScanTarget()
+    local override = TargetOverride()
+    if override then return override end
+
     local myName = UnitName("player")
     local now = GetTime()
     local bestName, bestPriority, bestAttempt
